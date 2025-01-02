@@ -1,10 +1,13 @@
 #include <Arduino.h>
 #include <pinDefines.h>
+#include "stdio.h"
+#include <NTPClient.h>
 
- #define nixieDataPin 32
- #define nixieLatchPin 27
- #define nixieClockPin 33
+#include "WiFi.h"
+#include <WiFiUdp.h>
 
+#include <Time.h>
+//struct tm timeinfo;
 
 /*
 Code to drive the old Dirk & Barry Nixie board that has 3ea 32 bit shift register pin drivers
@@ -17,13 +20,55 @@ Y  Y   M  M   D  D   H  H   M  M   S  S
 0  0   2 10   4 10   4 10   6 10   6 10
 */
 
+// choose your time zone from this list
+// https://github.com/nayarsystems/posix_tz_db/blob/master/zones.csv
+#define MY_TZ "EST5EDT,M3.2.0,M11.1.0"
+
+ #define nixieDataPin 32
+ #define nixieLatchPin 27
+ #define nixieClockPin 33
+
+
+
+int x=0;
+String strX;
+
+int oldSeconds;
+int tempHours;
+int tempHoursTens;
+int tempHoursUnits;
+
+long millisTensToDisplay;
+
+#define LED 2 // led on node mcu board
+
+// Replace with your network credentials
+//const char* ssid     = "bwardiPhone";
+//const char* password = "qpf9m0at983k6";
+
+//const char* ssid     = "NETGEAR56";
+//const char* password = "dailyearth432";
+
+const char* ssid     = "BHNTC8715D82E5";
+const char* password = "c1e41bec";
+
+// Define NTP Client to get time
+WiFiUDP ntpUDP;
+NTPClient timeClient(ntpUDP);
+
+#define MY_NTP_SERVER "0.north-america.pool.ntp.org"
+
+
+/* Globals */
+time_t now;                         // this are the seconds since Epoch (1970) - UTC
+tm tm;                              // the structure tm holds time information in a more convenient way
+
 int seconds = 0;
 int minutes = 0;
 int hours = 0;
 int days = 1;
 int months = 1;
 int years = 25;
-
 
 
 //-------------------------------
@@ -68,12 +113,12 @@ void updateTimeDisplay()
 //-------------------------------
 {
     digitalWrite(nixieLatchPin, LOW); //disable data from registers to outputs as long as you are transmitting
-    sendDigitPair(years);   // must be in the range of 0-59    
-    sendDigitPair(months);   // must be in the range of 0-59
-    sendDigitPair(days);   // must be in the range of 0-59
-    sendDigitPair(hours);   // must be in the range of 0-59
-    sendDigitPair(minutes);   // must be in the range of 0-59
-    sendDigitPair(seconds);   // must be in the range of 0-59
+    sendDigitPair(years);       // must be in the range of 0-49    
+    sendDigitPair(months);      // must be in the range of 0-39
+    sendDigitPair(days);        // must be in the range of 0-39
+    sendDigitPair(hours);       // must be in the range of 0-59
+    sendDigitPair(minutes);     // must be in the range of 0-59
+    sendDigitPair(seconds);     // must be in the range of 0-59
     digitalWrite(nixieLatchPin, HIGH); //strobe the data stored in the latches to the outputs
 }
 
@@ -95,7 +140,7 @@ void updateTimeDisplay()
 
 void setup() {
     Serial.begin(115200);
-Serial.println("starting \n");    
+    Serial.println("starting nixie clock \n");    
 
     pinMode(LED_pin,OUTPUT);
 
@@ -107,8 +152,6 @@ Serial.println("starting \n");
     digitalWrite(nixieLatchPin,LOW);  
     digitalWrite(nixieClockPin,LOW);
 
-    digitalWrite(nixieLatchPin,HIGH);       // Latch high so the data goes straight to the outputs
-
     for (int i=0; (i < 97); i++)            // loop to clear all of the output bits
     {
      digitalWrite(nixieClockPin,HIGH);
@@ -116,9 +159,26 @@ Serial.println("starting \n");
      digitalWrite(nixieClockPin,LOW);   
      delayMicroseconds(1);
     }
+    digitalWrite(nixieLatchPin,HIGH);       // send data to the outputs
+    digitalWrite(nixieLatchPin,LOW);        // 
+    
+
+    delay(500);
+    WiFi.begin(ssid, password);
+    while (WiFi.status() != WL_CONNECTED) 
+    {
+      // indicate that the ntp server has not connected
+      delay(400);
+      digitalWrite(LED,HIGH);
+
+    }
 
 
+  digitalWrite(LED,LOW);
 
+  configTime(0, 0, MY_NTP_SERVER);  // 0, 0 because we will use TZ in the next line
+  setenv("TZ", MY_TZ, 1);            // Set environment variable with your time zone
+  tzset();
 
 }
 
@@ -137,10 +197,60 @@ Serial.println("starting \n");
 
 void loop() {
 
-digitalWrite(LED_pin, !digitalRead(LED_pin));  //toggle LED
-delay(20);
-incTime();
-updateTimeDisplay();
+    time(&now);                         // read the current time
+    localtime_r(&now, &tm);             // update the structure tm with the current time
 
+    years = tm.tm_year -100; // eat 2000 years to leave the tens and units of the year
+    months = tm.tm_mon+1;
+    days = tm.tm_mday;
+    hours =  tm.tm_hour;       
+        if (hours >= 13) hours -= 12;    // 12 hour mode
+        if (hours == 0) hours = 12;
+    minutes = tm.tm_min;
+    seconds = tm.tm_sec;
+
+
+    delay(200);
+    //digitalWrite(LED_pin, !digitalRead(LED_pin));  //toggle LED
+    updateTimeDisplay();   // send the data to the nixie display
 }
 
+/*
+
+  Serial.print("year:");
+  Serial.print(tm.tm_year + 1900);    // years since 1900
+  Serial.print("\tmonth:");
+  Serial.print(tm.tm_mon + 1);        // January = 0 (!)
+  Serial.print("\tday:");
+  Serial.print(tm.tm_mday);           // day of month
+  Serial.print("\thour:");
+  Serial.print(tm.tm_hour);           // hours since midnight 0-23
+  Serial.print("\tmin:");
+  Serial.print(tm.tm_min);            // minutes after the hour 0-59
+  Serial.print("\tsec:");
+  Serial.print(tm.tm_sec);            // seconds after the minute 0-61*
+  Serial.print("\twday");
+  Serial.print(tm.tm_wday);           // days since Sunday 0-6
+  if (tm.tm_isdst == 1)               // Daylight Saving Time flag
+    Serial.print("\tDST");  
+  else
+    Serial.print("\tstandard");
+
+
+
+
+//  time_t local = now();
+//    Serial.println("%5U31288%S%0J%2AGPS:lock,local %4A%255C  " + timeClient.getFormattedTime() + ".724%Z");
+
+//      sprintf(tmpStringArray, "SAT %.2d:%.2d:%.2d.%.3d", hour(local), minute(local), second(local));
+//      tempString = timeClient.getFormattedTime();
+
+
+
+
+
+
+
+
+
+    */

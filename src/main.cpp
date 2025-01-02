@@ -70,6 +70,27 @@ int days = 1;
 int months = 1;
 int years = 25;
 
+//-------------------------------
+void clearShiftRegs()
+//-------------------------------
+{
+for (int i=0; (i < 97); i++)            // loop to clear all of the output bits
+    {
+    digitalWrite(nixieClockPin,HIGH);
+    delayMicroseconds(1);
+    digitalWrite(nixieClockPin,LOW);   
+    delayMicroseconds(1);
+    }
+}
+
+//-------------------------------
+void strobeTheData()
+//-------------------------------
+{
+    digitalWrite(nixieLatchPin,HIGH);       // send data to the outputs
+    digitalWrite(nixieLatchPin,LOW);        // 
+    
+}
 
 //-------------------------------
 void sendDigitPair(int digitData)
@@ -82,9 +103,13 @@ void sendDigitPair(int digitData)
     shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, tempData & 255);    // shift out the low byte
 }
 
+
+
+//------------------------------- 
+void incTime()              
 //-------------------------------
-void incTime()              // TERRIBLE !!!  FIX ME leap year, DST, Time zone, yada
-//-------------------------------
+//Just for testing of rollover etc, does not really keep track of time
+//Other time keeping/ updating functons NTP, GPS, RTC must be disabled so the YMDHMS car can be used as counters
 {
 seconds ++;
  if (seconds >= 59) 
@@ -107,6 +132,38 @@ seconds ++;
     }
  }
 }
+
+//-------------------------------
+void rollTheZeros()
+//-------------------------------
+//some bs code to flash the clock zeros during wifi acquistion
+{
+    clearShiftRegs();
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 1);     //rhs units zero
+    strobeTheData();
+    delay(100);
+    clearShiftRegs();
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 4);     //rhs tens zero
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 0);     //push data to 2nd byte of SR
+    strobeTheData();
+    delay(100);    
+    clearShiftRegs();
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 1);     //third zero   
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 0); 
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 0);     //push data to 3nd byte of SR
+    strobeTheData();
+    delay(100);    
+    clearShiftRegs();
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 4);     //tens zero
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 0);     //push data to 4th byte of SR
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 0); 
+    shiftOut(nixieDataPin, nixieClockPin, MSBFIRST, 0);     //push data to 4th byte of SR
+    strobeTheData();
+    delay(100);    
+
+}
+
+
 
 //-------------------------------
 void updateTimeDisplay()
@@ -152,30 +209,23 @@ void setup() {
     digitalWrite(nixieLatchPin,LOW);  
     digitalWrite(nixieClockPin,LOW);
 
-    for (int i=0; (i < 97); i++)            // loop to clear all of the output bits
-    {
-     digitalWrite(nixieClockPin,HIGH);
-     delayMicroseconds(1);
-     digitalWrite(nixieClockPin,LOW);   
-     delayMicroseconds(1);
-    }
-    digitalWrite(nixieLatchPin,HIGH);       // send data to the outputs
-    digitalWrite(nixieLatchPin,LOW);        // 
-    
+    clearShiftRegs();
+    strobeTheData();
 
     delay(500);
     WiFi.begin(ssid, password);
     while (WiFi.status() != WL_CONNECTED) 
-    {
-      // indicate that the ntp server has not connected
-      delay(400);
-      digitalWrite(LED,HIGH);
+        {
+        // indicate that the ntp server has not connected
+    //    delay(400);
+        digitalWrite(LED,HIGH);
+        rollTheZeros();
+        }
 
-    }
 
+    digitalWrite(LED,LOW);
 
-  digitalWrite(LED,LOW);
-
+//With these 3 lines you define your timezone an the NTP server.
   configTime(0, 0, MY_NTP_SERVER);  // 0, 0 because we will use TZ in the next line
   setenv("TZ", MY_TZ, 1);            // Set environment variable with your time zone
   tzset();
@@ -200,7 +250,7 @@ void loop() {
     time(&now);                         // read the current time
     localtime_r(&now, &tm);             // update the structure tm with the current time
 
-    years = tm.tm_year -100; // eat 2000 years to leave the tens and units of the year
+    years = tm.tm_year -100;            // eat 2000 years to leave the tens and units of the year  (tm is years since 1900)
     months = tm.tm_mon+1;
     days = tm.tm_mday;
     hours =  tm.tm_hour;       
